@@ -1,300 +1,657 @@
-import React, { useState, useEffect } from "react";
-import { db } from "./firebaseConfig";
-import { collection, getDocs, query, orderBy } from "firebase/firestore";
+import React, { useState, useEffect } from 'react';
+import { db } from './firebaseConfig';
+import { collection, query, where, onSnapshot, getDocs } from 'firebase/firestore';
 
-const Historial = ({ onBack }) => {
-  const [movimientos, setMovimientos] = useState({});
-  const [loading, setLoading] = useState(true);
+function Historial({ onBack }) {
+  const [transactions, setTransactions] = useState([]);
+  const [selectedEmpresa, setSelectedEmpresa] = useState('');
+  const [empresasList, setEmpresasList] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [fetchingEmpresas, setFetchingEmpresas] = useState(true);
+  const [error, setError] = useState(null);
+  const [selectedYear, setSelectedYear] = useState('');
+  const [availableYears, setAvailableYears] = useState([]);
 
-  const organizarPorMes = (ingresos, gastos) => {
-    const movimientosPorMes = {};
-    
-    // Función auxiliar para agregar movimientos al objeto organizado
-    const agregarMovimiento = (movimiento, tipo) => {
-      const fecha = new Date(movimiento.date);
-      const mesKey = `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, '0')}`;
-      
-      if (!movimientosPorMes[mesKey]) {
-        movimientosPorMes[mesKey] = {
-          ingresos: [],
-          gastos: [],
-          totalIngresos: 0,
-          totalGastos: 0,
-          balance: 0
-        };
-      }
-      
-      if (tipo === 'ingreso') {
-        movimientosPorMes[mesKey].ingresos.push(movimiento);
-        movimientosPorMes[mesKey].totalIngresos += movimiento.total;
-      } else {
-        movimientosPorMes[mesKey].gastos.push(movimiento);
-        movimientosPorMes[mesKey].totalGastos += movimiento.total;
-      }
-      
-      movimientosPorMes[mesKey].balance = 
-        movimientosPorMes[mesKey].totalIngresos - movimientosPorMes[mesKey].totalGastos;
-    };
+  const meses = [
+    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+  ];
 
-    ingresos.forEach(ingreso => agregarMovimiento(ingreso, 'ingreso'));
-    gastos.forEach(gasto => agregarMovimiento(gasto, 'gasto'));
+  const tipos = [
+    "Caja", "Ingreso", "Costo", "IVA", "PPM", 
+    "Ajuste CF", "Retencion SC", "Honorarios", 
+    "Gastos Generales", "Cuentas Varias"
+  ];
 
-    // Ordenar las claves en orden descendente
-    return Object.keys(movimientosPorMes)
-      .sort((a, b) => b.localeCompare(a))
-      .reduce((obj, key) => {
-        obj[key] = movimientosPorMes[key];
-        return obj;
-      }, {});
-  };
+  const unsubscribeRef = React.useRef(null);
 
+  // Cargar la lista de empresas disponibles al montar el componente
   useEffect(() => {
-    const fetchData = async () => {
+    const fetchEmpresas = async () => {
       try {
-        const ingresosQuery = query(
-          collection(db, "ingresos"),
-          orderBy("date", "desc")
-        );
-        const gastosQuery = query(
-          collection(db, "gastos"),
-          orderBy("date", "desc")
-        );
-
-        const [ingresosSnapshot, gastosSnapshot] = await Promise.all([
-          getDocs(ingresosQuery),
-          getDocs(gastosQuery)
-        ]);
-
-        const ingresosData = ingresosSnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-
-        const gastosData = gastosSnapshot.docs.map(doc => {
-          const data = doc.data();
-          if (!data.products) {
-            return {
-              id: doc.id,
-              date: data.date,
-              products: [{
-                name: data.product || '',
-                price: data.price || 0
-              }],
-              total: data.price || 0
-            };
-          }
-          return {
-            id: doc.id,
-            ...data
-          };
-        });
-
-        setMovimientos(organizarPorMes(ingresosData, gastosData));
-        setLoading(false);
+        setFetchingEmpresas(true);
+        setError(null);
+        
+        // Obtener documentos desde la colección 'registros'
+        const empresas = [];
+        const years = [];
+        
+        // Consulta a la colección 'registros'
+        const registrosCol = collection(db, 'registros');
+        const registrosSnapshot = await getDocs(registrosCol);
+        
+        if (!registrosSnapshot.empty) {
+          console.log(`Se encontraron ${registrosSnapshot.size} documentos en registros`);
+          
+          registrosSnapshot.forEach(doc => {
+            const data = doc.data();
+            
+            if (data.empresa) {
+              empresas.push(data.empresa);
+            }
+            
+            if (data.año) {
+              const yearStr = data.año.toString();
+              years.push(yearStr);
+            }
+          });
+        } else {
+          console.log("No hay documentos en la colección registros");
+        }
+        
+        if (empresas.length === 0 && years.length === 0) {
+          setError("No se encontraron registros en la base de datos");
+          setFetchingEmpresas(false);
+          return;
+        }
+        
+        console.log(`Total empresas extraídas: ${empresas.length}`);
+        console.log(`Total años extraídos: ${years.length}`);
+        
+        // Eliminar duplicados y valores nulos
+        const uniqueEmpresas = [...new Set(empresas)].filter(Boolean);
+        const uniqueYears = [...new Set(years)].filter(Boolean);
+        
+        console.log(`Empresas únicas: ${uniqueEmpresas.join(', ')}`);
+        console.log(`Años únicos: ${uniqueYears.join(', ')}`);
+        
+        // Ordenar alfabéticamente las empresas
+        uniqueEmpresas.sort();
+        
+        // Ordenar años en orden descendente (más reciente primero)
+        uniqueYears.sort((a, b) => b - a);
+        
+        setEmpresasList(uniqueEmpresas);
+        setAvailableYears(uniqueYears);
+        
+        // Seleccionar valores por defecto si existen
+        if (uniqueEmpresas.length > 0) {
+          setSelectedEmpresa(uniqueEmpresas[0]);
+          console.log(`Empresa seleccionada por defecto: ${uniqueEmpresas[0]}`);
+        }
+        
+        if (uniqueYears.length > 0) {
+          setSelectedYear(uniqueYears[0]);
+          console.log(`Año seleccionado por defecto: ${uniqueYears[0]}`);
+        }
       } catch (error) {
-        console.error("Error al obtener datos:", error);
-        setLoading(false);
+        console.error("Error al cargar la lista de empresas y años:", error);
+        setError(`Error al cargar los datos: ${error.message}`);
+      } finally {
+        setFetchingEmpresas(false);
       }
     };
 
-    fetchData();
+    fetchEmpresas();
+
+    // Cleanup subscription on unmount
+    return () => {
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+      }
+    };
   }, []);
 
-  const formatearMes = (mesKey) => {
-    const [año, mes] = mesKey.split('-');
-    const meses = [
-      'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-      'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
-    ];
-    return `${meses[parseInt(mes) - 1]} ${año}`;
+  // Ejecutar búsqueda automáticamente cuando se selecciona una empresa y un año
+  useEffect(() => {
+    if (selectedEmpresa && selectedYear && !fetchingEmpresas) {
+      handleSearch();
+    }
+  }, [selectedEmpresa, selectedYear]);
+
+  const handleSearch = () => {
+    if (!selectedEmpresa) {
+      setError("Por favor seleccione una empresa");
+      return;
+    }
+    if (!selectedYear) {
+      setError("Por favor seleccione un año");
+      return;
+    }
+
+    setError(null);
+    setLoading(true);
+    
+    // Limpiar transacciones anteriores
+    setTransactions([]);
+
+    // Cleanup previous subscription
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+    }
+
+    console.log(`Buscando registros para empresa: "${selectedEmpresa}", año: "${selectedYear}"`);
+
+    // Consultar la colección 'registros'
+    const registrosQuery = query(
+      collection(db, 'registros'),
+      where('empresa', '==', selectedEmpresa),
+      where('año', '==', selectedYear)
+    );
+
+    const unsubscribeRegistros = onSnapshot(registrosQuery, (snapshot) => {
+      const registrosData = snapshot.docs.map(doc => {
+        const data = doc.data();
+        return { id: doc.id, ...data };
+      });
+      
+      console.log(`Encontrados ${registrosData.length} registros en 'registros'`);
+      
+      if (registrosData.length === 0) {
+        console.log("No se encontraron resultados para la búsqueda");
+        setTransactions([]);
+        setLoading(false);
+        return;
+      }
+      
+      setTransactions(registrosData);
+      setLoading(false);
+    }, (error) => {
+      console.error("Error fetching registros:", error);
+      setError(`Error al cargar los datos: ${error.message}`);
+      setLoading(false);
+    });
+    
+    unsubscribeRef.current = unsubscribeRegistros;
   };
 
-  if (loading) {
-    return <div className="container">Cargando datos...</div>;
-  }
+  const formatCurrency = (value) => {
+    if (!value && value !== 0) return '-';
+    
+    // Si es string, convertir a número
+    const numValue = typeof value === 'string' ? parseFloat(value) : value;
+    
+    return new Intl.NumberFormat('es-CL', {
+      style: 'currency',
+      currency: 'CLP',
+      minimumFractionDigits: 0,
+    }).format(numValue);
+  };
+
+  // Función para procesar las transacciones del mes
+  const getMonthTransactions = (mes) => {
+    if (!transactions.length) {
+      return [];
+    }
+    
+    console.log(`Obteniendo transacciones para el mes: ${mes}`);
+    
+    const monthTransactions = transactions.filter(t => t.mes === mes);
+    
+    console.log(`Encontradas ${monthTransactions.length} transacciones para ${mes}`);
+    
+    const result = [];
+    
+    // Procesamos los registros de la nueva estructura
+    monthTransactions.forEach(transaction => {
+      // Verificamos si existe el array datos
+      if (transaction.datos && transaction.datos.length > 0) {
+        // Agrupamos los elementos por control y detalle para tenerlos en la misma fila
+        const groupedItems = {};
+        
+        transaction.datos.forEach(item => {
+          const key = `${item.control}-${item.detalle}`;
+          
+          if (!groupedItems[key]) {
+            groupedItems[key] = {
+              control: item.control,
+              detalle: item.detalle,
+              debe: {},
+              haber: {},
+              fecha: transaction.date
+            };
+          }
+          
+          // Asignar valor según el tipo de transacción (debe/haber)
+          if (item.tipoTransaccion === 'debe') {
+            groupedItems[key].debe[item.tipo] = parseFloat(item.monto);
+          } else if (item.tipoTransaccion === 'haber') {
+            groupedItems[key].haber[item.tipo] = parseFloat(item.monto);
+          }
+        });
+        
+        // Convertir el objeto agrupado a un array de elementos
+        Object.values(groupedItems).forEach(groupedItem => {
+          result.push(groupedItem);
+        });
+      }
+    });
+    
+    // Ordenar por fecha (si está disponible)
+    result.sort((a, b) => {
+      if (a.fecha && b.fecha) {
+        if (a.fecha < b.fecha) return -1;
+        if (a.fecha > b.fecha) return 1;
+      }
+      return 0;
+    });
+    
+    return result;
+  };
+
+  // Función para renderizar filas de un mes específico
+  const renderMonthRows = (mes) => {
+    const monthTransactions = getMonthTransactions(mes);
+    
+    // Siempre queremos exactamente 6 filas por mes
+    const rowsToRender = Array(6).fill(null);
+    
+    // Llenar con transacciones existentes
+    for (let i = 0; i < Math.min(monthTransactions.length, 6); i++) {
+      rowsToRender[i] = monthTransactions[i];
+    }
+    
+    return (
+      <React.Fragment key={mes}>
+        {rowsToRender.map((transaction, index) => (
+          <tr key={`${mes}-row-${index}`} className={index === 5 ? "last-month-row" : ""}>
+            {index === 0 && (
+              <td className="mes-cell" rowSpan="6">{mes}</td>
+            )}
+            <td className="detalle-cell">
+              {transaction ? transaction.detalle || '-' : '-'}
+            </td>
+            <td className="control-cell">
+              {transaction ? formatCurrency(transaction.control) : '-'}
+            </td>
+            {tipos.map(tipo => {
+              // Para cada tipo, verificar si hay valores en debe o haber
+              let debeValue = '';
+              let haberValue = '';
+              
+              if (transaction) {
+                if (transaction.debe && transaction.debe[tipo] !== undefined) {
+                  debeValue = transaction.debe[tipo];
+                }
+                
+                if (transaction.haber && transaction.haber[tipo] !== undefined) {
+                  haberValue = transaction.haber[tipo];
+                }
+              }
+              
+              return (
+                <React.Fragment key={`${mes}-${index}-${tipo}`}>
+                  <td className="monto-cell debe">
+                    {debeValue !== '' ? formatCurrency(debeValue) : '-'}
+                  </td>
+                  <td className="monto-cell haber">
+                    {haberValue !== '' ? formatCurrency(haberValue) : '-'}
+                  </td>
+                </React.Fragment>
+              );
+            })}
+          </tr>
+        ))}
+      </React.Fragment>
+    );
+  };
+
+  // Renderizar un mensaje de estado de carga o un mensaje de "no datos" más explícito
+  const renderStatus = () => {
+    if (loading) {
+      return <div className="loading">Cargando datos...</div>;
+    }
+    
+    if (transactions.length === 0) {
+      if (!selectedEmpresa || !selectedYear) {
+        return <div className="no-data">Seleccione una empresa y un año para ver los registros</div>;
+      }
+      
+      return (
+        <div className="no-data">
+          No se encontraron registros para <strong>{selectedEmpresa}</strong> en el año <strong>{selectedYear}</strong>
+          <p className="hint">Esto puede ser porque no existan registros o porque los valores no coinciden exactamente con los de la base de datos.</p>
+        </div>
+      );
+    }
+    
+    return (
+      <>
+        <div className="data-info">
+          Mostrando registros de <strong>{selectedEmpresa}</strong> para el año <strong>{selectedYear}</strong>
+          <span className="record-count">({transactions.length} registros encontrados)</span>
+        </div>
+        <table className="registro-table">
+          <thead>
+            <tr>
+              <th rowSpan="2">Mes</th>
+              <th rowSpan="2">Detalle</th>
+              <th rowSpan="2">Control</th>
+              {tipos.map((tipo) => (
+                <th key={tipo} colSpan="2" className="tipo-header">
+                  {tipo}
+                </th>
+              ))}
+            </tr>
+            <tr>
+              {tipos.map((tipo) => (
+                <React.Fragment key={`header-${tipo}`}>
+                  <th className="debe-header">Debe</th>
+                  <th className="haber-header">Haber</th>
+                </React.Fragment>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {meses.map((mes) => renderMonthRows(mes))}
+          </tbody>
+        </table>
+      </>
+    );
+  };
 
   return (
-    <div className="container">
-      <h2>Historial de Movimientos</h2>
+    <div className="registro-container">
+      <h2 className="registro-title">Historial de Registros</h2>
+      
+      <div className="search-controls">
+        <button onClick={onBack} className="back-button">
+          Volver al Menú Principal
+        </button>
 
-      {Object.entries(movimientos).map(([mesKey, datosMes]) => (
-        <div key={mesKey} className="mes-seccion">
-          <div className="mes-header">
-            <h3>{formatearMes(mesKey)}</h3>
-            <div className="mes-resumen">
-              <span>Ingresos: ${datosMes.totalIngresos.toFixed(2)}</span>
-              <span>Gastos: ${datosMes.totalGastos.toFixed(2)}</span>
-              <span className="balance">Balance: ${datosMes.balance.toFixed(2)}</span>
-            </div>
+        <div className="filters">
+          <div className="filter-group">
+            <label htmlFor="empresa">Empresa:</label>
+            {fetchingEmpresas ? (
+              <p className="loading-text">Cargando empresas...</p>
+            ) : (
+              <select
+                id="empresa"
+                value={selectedEmpresa}
+                onChange={(e) => setSelectedEmpresa(e.target.value)}
+                className="empresa-select"
+                disabled={empresasList.length === 0 || loading}
+              >
+                {empresasList.length === 0 ? (
+                  <option value="">No hay empresas disponibles</option>
+                ) : (
+                  <>
+                    <option value="">Seleccione una empresa</option>
+                    {empresasList.map(empresa => (
+                      <option key={empresa} value={empresa}>{empresa}</option>
+                    ))}
+                  </>
+                )}
+              </select>
+            )}
+            {empresasList.length > 0 && (
+              <small className="select-count">{empresasList.length} empresas disponibles</small>
+            )}
           </div>
 
-          <div className="movimientos-container">
-            <div className="seccion-ingresos">
-              <h4>Ingresos</h4>
-              {datosMes.ingresos.map((ingreso) => (
-                <div key={ingreso.id} className="registro">
-                  <div className="registro-header">
-                    <span className="fecha">Fecha: {ingreso.date}</span>
-                    <span className="cliente">Cliente: {ingreso.clientName}</span>
-                  </div>
-                  <div className="productos">
-                    {ingreso.products.map((product, index) => (
-                      <div key={index} className="producto">
-                        <span>{product.name}</span>
-                        <span>${parseFloat(product.price).toFixed(2)}</span>
-                      </div>
+          <div className="filter-group">
+            <label htmlFor="year">Año:</label>
+            {fetchingEmpresas ? (
+              <p className="loading-text">Cargando años...</p>
+            ) : (
+              <select
+                id="year"
+                value={selectedYear}
+                onChange={(e) => setSelectedYear(e.target.value)}
+                className="year-select"
+                disabled={availableYears.length === 0 || loading}
+              >
+                {availableYears.length === 0 ? (
+                  <option value="">No hay años disponibles</option>
+                ) : (
+                  <>
+                    <option value="">Seleccione un año</option>
+                    {availableYears.map(year => (
+                      <option key={year} value={year}>{year}</option>
                     ))}
-                  </div>
-                  <p className="total">Total: ${ingreso.total.toFixed(2)}</p>
-                </div>
-              ))}
-            </div>
-
-            <div className="seccion-gastos">
-              <h4>Gastos</h4>
-              {datosMes.gastos.map((gasto) => (
-                <div key={gasto.id} className="registro">
-                  <p className="fecha">Fecha: {gasto.date}</p>
-                  <div className="productos">
-                    {gasto.products.map((product, index) => (
-                      <div key={index} className="producto">
-                        <span>{product.name}</span>
-                        <span>${parseFloat(product.price).toFixed(2)}</span>
-                      </div>
-                    ))}
-                  </div>
-                  <p className="total">Total: ${gasto.total.toFixed(2)}</p>
-                </div>
-              ))}
-            </div>
+                  </>
+                )}
+              </select>
+            )}
+            {availableYears.length > 0 && (
+              <small className="select-count">{availableYears.length} años disponibles</small>
+            )}
           </div>
         </div>
-      ))}
+      </div>
 
-      <button onClick={onBack} className="back-button">Volver al Menú Principal</button>
+      {error && <div className="error-message">{error}</div>}
+
+      <div className="table-responsive">
+        {renderStatus()}
+      </div>
 
       <style jsx>{`
-        .container {
+        .registro-container {
           padding: 20px;
-          max-width: 1200px;
-          margin: 0 auto;
+          max-width: 100%;
+          overflow-x: auto;
         }
 
-        .mes-seccion {
-          margin-bottom: 40px;
-          background-color: #fff;
-          border-radius: 8px;
-          box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-          padding: 20px;
-        }
-
-        .mes-header {
-          border-bottom: 2px solid #eee;
-          padding-bottom: 15px;
+        .registro-title {
           margin-bottom: 20px;
+          color: #333;
+          text-align: center;
         }
 
-        .mes-resumen {
-          display: flex;
-          gap: 20px;
-          margin-top: 10px;
-          font-size: 1.1em;
-        }
-
-        .balance {
-          font-weight: bold;
-          color: #0d6efd;
-        }
-
-        .movimientos-container {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 20px;
-        }
-
-        .registro {
-          background-color: #f8f9fa;
-          border: 1px solid #dee2e6;
-          padding: 15px;
-          margin-bottom: 15px;
-          border-radius: 8px;
-        }
-
-        .registro-header {
+        .search-controls {
           display: flex;
           justify-content: space-between;
-          margin-bottom: 10px;
+          align-items: center;
+          margin-bottom: 20px;
+          flex-wrap: wrap;
+          gap: 20px;
+          background-color: #f8f9fa;
+          padding: 15px;
+          border-radius: 5px;
+          box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .filters {
+          display: flex;
+          gap: 15px;
+          align-items: flex-end;
+          flex-wrap: wrap;
+        }
+
+        .filter-group {
+          display: flex;
+          flex-direction: column;
+          gap: 5px;
+        }
+
+        .filter-group label {
+          font-weight: 500;
           color: #666;
         }
 
-        .cliente {
-          font-weight: bold;
-          color: #0d6efd;
-        }
-
-        .productos {
-          margin: 10px 0;
-        }
-
-        .producto {
-          display: flex;
-          justify-content: space-between;
-          padding: 5px 15px;
-          border-bottom: 1px solid #eee;
-        }
-
-        .producto:last-child {
-          border-bottom: none;
-        }
-
-        .total {
-          font-weight: bold;
-          text-align: right;
-          margin-top: 10px;
-          padding-top: 10px;
-          border-top: 2px solid #eee;
-        }
-
-        h3 {
-          color: #343a40;
+        .loading-text {
           margin: 0;
+          color: #666;
+          font-size: 14px;
         }
 
-        h4 {
-          color: #495057;
-          margin-bottom: 15px;
+        .select-count {
+          font-size: 12px;
+          color: #6c757d;
+          margin-top: 2px;
+        }
+
+        .empresa-select,
+        .year-select {
+          padding: 8px 12px;
+          border: 1px solid #ddd;
+          border-radius: 4px;
+          font-size: 14px;
+          min-width: 200px;
+          background-color: white;
         }
 
         .back-button {
-          width: 100%;
-          padding: 12px;
+          padding: 8px 16px;
+          border: none;
+          border-radius: 4px;
+          cursor: pointer;
+          font-weight: 500;
+          transition: background-color 0.2s;
           background-color: #6c757d;
           color: white;
-          border: none;
-          border-radius: 6px;
-          cursor: pointer;
-          font-size: 1em;
-          transition: background-color 0.2s;
-          margin-top: 20px;
         }
 
         .back-button:hover {
           background-color: #5a6268;
         }
 
+        .error-message {
+          color: #dc3545;
+          margin-bottom: 15px;
+          padding: 10px;
+          background-color: #f8d7da;
+          border-radius: 4px;
+        }
+
+        .loading, .no-data {
+          text-align: center;
+          padding: 30px;
+          color: #666;
+          background-color: #f8f9fa;
+          border-radius: 4px;
+          margin-top: 20px;
+        }
+
+        .hint {
+          font-size: 14px;
+          margin-top: 10px;
+          color: #6c757d;
+        }
+
+        .data-info {
+          margin-bottom: 15px;
+          padding: 10px;
+          background-color: #e9ecef;
+          border-radius: 4px;
+          text-align: center;
+        }
+
+        .record-count {
+          margin-left: 10px;
+          font-size: 14px;
+          color: #6c757d;
+        }
+
+        .table-responsive {
+          overflow-x: auto;
+          margin-top: 20px;
+        }
+
+        .registro-table {
+          width: 100%;
+          border-collapse: collapse;
+          font-size: 14px;
+          white-space: nowrap;
+        }
+
+        .registro-table th,
+        .registro-table td {
+          border: 1px solid #ddd;
+          padding: 8px;
+          text-align: center;
+        }
+
+        .registro-table thead th {
+          background-color: #f8f9fa;
+          font-weight: 600;
+          position: sticky;
+          top: 0;
+          z-index: 10;
+        }
+
+        .tipo-header {
+          background-color: #e9ecef;
+        }
+
+        .debe-header {
+          background-color: #f8d7da;
+        }
+
+        .haber-header {
+          background-color: #d4edda;
+        }
+
+        .mes-cell {
+          font-weight: 500;
+          background-color: #f8f9fa;
+          position: sticky;
+          left: 0;
+          z-index: 5;
+          border: 2px solid #aaa;
+        }
+
+        .detalle-cell {
+          text-align: left;
+          max-width: 250px;
+          white-space: normal;
+          word-break: break-word;
+        }
+
+        .control-cell {
+          font-weight: 500;
+        }
+
+        .monto-cell {
+          text-align: right;
+        }
+
+        .monto-cell.debe {
+          background-color: #f3fff3;
+        }
+
+        .monto-cell.haber {
+          background-color: #fff3f3;
+        }
+
+        .last-month-row td {
+          border-bottom: 2px solid #aaa;
+        }
+
         @media (max-width: 768px) {
-          .movimientos-container {
-            grid-template-columns: 1fr;
-          }
-          
-          .mes-resumen {
+          .search-controls {
             flex-direction: column;
-            gap: 5px;
+            align-items: stretch;
+          }
+
+          .filters {
+            flex-direction: column;
+          }
+
+          .filter-group {
+            width: 100%;
+          }
+
+          .empresa-select,
+          .year-select {
+            width: 100%;
+            min-width: unset;
           }
         }
       `}</style>
     </div>
   );
-};
+}
 
 export default Historial;

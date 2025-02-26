@@ -1,0 +1,143 @@
+.registro-container {
+  padding: 10px;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.registro-title {
+  margin-bottom: 0px;
+  margin-top: -15px;
+  font-size: 20px; /* 5% menos */
+  color: #333;
+}
+
+.empresa-container {
+  margin-bottom: 20px;
+}
+
+.search-container {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 5px;
+}
+
+.empresa-input {
+  width: 300px;
+  padding: 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+.search-button {
+  padding: 8px 16px;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.search-button:hover {
+  background-color: #0056b3;
+}
+
+.table-responsive {
+  overflow-x: auto;
+  max-width: 100%;
+  margin-top: 20px;
+  margin-bottom: 11.4px; /* 5% menos */
+}
+
+.registro-table {
+  width: 100%;
+  border-collapse: collapse;
+  white-space: nowrap;
+  border: 1.14px solid #ddd; /* 5% menos */
+  background-color: white;
+}
+
+.registro-table th,
+.registro-table td {
+  border: 1px solid #ddd;
+  padding: 8px;
+  text-align: left;
+}
+
+.registro-table th {
+  background-color: #f4f4f4;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.header-row th,
+.subheader-row th {
+  background-color: #f8f9fa;
+  border: 0.57px solid #ddd; /* 5% menos */
+  padding: 6.84px; /* 5% menos */
+  text-align: center;
+  font-weight: bold;
+}
+
+.header-group {
+  background-color: #e9ecef !important;
+}
+
+.sticky-header,
+.sticky-subheader {
+  position: sticky;
+  top: 0;
+  background-color: #f8f9fa;
+  z-index: 1;
+}
+
+.data-row:nth-child(even) {
+  background-color: #f8f9fa;
+}
+
+.data-row:hover {
+  background-color: #f0f0f0;
+}
+
+.cell {
+  border: 0.57px solid #ddd; /* 5% menos */
+  padding: 4.56px; /* 5% menos */
+  text-align: right;
+}
+
+.cell:first-child,
+.cell:nth-child(2),
+.cell:nth-child(3) {
+  text-align: left;
+}
+
+.monto-cell {
+  text-align: right;
+  min-width: 120px;
+}
+
+.loading {
+  text-align: center;
+  padding: 20px;
+}
+
+.empty-row td {
+  background-color: #f9f9f9;
+}
+
+.back-button {
+  position: absolute;
+  margin-left: 80%;
+  top: 20px;
+  padding: 10px 15px;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.back-button:hover {
+  background-color: #0056b3;
+}
