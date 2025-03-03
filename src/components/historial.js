@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from './firebaseConfig';
+import './historial.css';
 import { collection, query, where, onSnapshot, getDocs } from 'firebase/firestore';
 
 function Historial({ onBack }) {
@@ -24,6 +25,7 @@ function Historial({ onBack }) {
   ];
 
   const unsubscribeRef = React.useRef(null);
+  const tableRef = React.useRef(null);
 
   // Cargar la lista de empresas disponibles al montar el componente
   useEffect(() => {
@@ -84,12 +86,8 @@ function Historial({ onBack }) {
         setEmpresasList(uniqueEmpresas);
         setAvailableYears(uniqueYears);
         
-        // Seleccionar valores por defecto si existen
-        if (uniqueEmpresas.length > 0) {
-          setSelectedEmpresa(uniqueEmpresas[0]);
-          console.log(`Empresa seleccionada por defecto: ${uniqueEmpresas[0]}`);
-        }
-        
+        // Ahora NO seleccionamos la primera empresa por defecto
+        // Solo seleccionamos el año más reciente por defecto
         if (uniqueYears.length > 0) {
           setSelectedYear(uniqueYears[0]);
           console.log(`Año seleccionado por defecto: ${uniqueYears[0]}`);
@@ -206,34 +204,66 @@ function Historial({ onBack }) {
     monthTransactions.forEach(transaction => {
       // Verificamos si existe el array datos
       if (transaction.datos && transaction.datos.length > 0) {
-        // Agrupamos los elementos por control y detalle para tenerlos en la misma fila
-        const groupedItems = {};
+        // Extraer cuentas varias para procesarlas por separado
+        const cuentasVariasDebe = transaction.datos
+          .filter(item => item.tipo === "Cuentas Varias" && item.tipoTransaccion === "debe")
+          .map(item => ({ 
+            observacion: item.observacion, 
+            monto: parseFloat(item.monto)
+          }));
+          
+        const cuentasVariasHaber = transaction.datos
+          .filter(item => item.tipo === "Cuentas Varias" && item.tipoTransaccion === "haber")
+          .map(item => ({ 
+            observacion: item.observacion, 
+            monto: parseFloat(item.monto)
+          }));
         
+        // Extraer tipos personalizados (que no están en la lista de tipos predefinidos)
+        const tiposPersonalizadosDebe = transaction.datos
+          .filter(item => !tipos.includes(item.tipo) && item.tipoTransaccion === "debe")
+          .map(item => ({
+            tipo: item.tipo,
+            observacion: item.observacion,
+            monto: parseFloat(item.monto),
+            detalle: item.detalle
+          }));
+        
+        const tiposPersonalizadosHaber = transaction.datos
+          .filter(item => !tipos.includes(item.tipo) && item.tipoTransaccion === "haber")
+          .map(item => ({
+            tipo: item.tipo,
+            observacion: item.observacion,
+            monto: parseFloat(item.monto),
+            detalle: item.detalle
+          }));
+        
+        // Agrupar los items que no son cuentas varias
+        const groupedItem = {
+          control: transaction.control,
+          detalle: transaction.datos[0]?.detalle || '',
+          debe: {},
+          haber: {},
+          fecha: transaction.date,
+          cuentasVariasDebe,
+          cuentasVariasHaber,
+          tiposPersonalizadosDebe,
+          tiposPersonalizadosHaber
+        };
+        
+        // Procesar items regulares
         transaction.datos.forEach(item => {
-          const key = `${item.control}-${item.detalle}`;
-          
-          if (!groupedItems[key]) {
-            groupedItems[key] = {
-              control: item.control,
-              detalle: item.detalle,
-              debe: {},
-              haber: {},
-              fecha: transaction.date
-            };
-          }
-          
-          // Asignar valor según el tipo de transacción (debe/haber)
-          if (item.tipoTransaccion === 'debe') {
-            groupedItems[key].debe[item.tipo] = parseFloat(item.monto);
-          } else if (item.tipoTransaccion === 'haber') {
-            groupedItems[key].haber[item.tipo] = parseFloat(item.monto);
+          if (tipos.includes(item.tipo)) {
+            if (item.tipoTransaccion === 'debe') {
+              groupedItem.debe[item.tipo] = parseFloat(item.monto);
+            } else if (item.tipoTransaccion === 'haber') {
+              groupedItem.haber[item.tipo] = parseFloat(item.monto);
+            }
           }
         });
         
-        // Convertir el objeto agrupado a un array de elementos
-        Object.values(groupedItems).forEach(groupedItem => {
-          result.push(groupedItem);
-        });
+        // Añadir el item agrupado principal
+        result.push(groupedItem);
       }
     });
     
@@ -249,48 +279,210 @@ function Historial({ onBack }) {
     return result;
   };
 
+  // Obtener todos los tipos personalizados en las transacciones
+  const getAllCustomTypes = () => {
+    const customTypes = new Set();
+    
+    transactions.forEach(transaction => {
+      if (transaction.datos && transaction.datos.length > 0) {
+        transaction.datos.forEach(item => {
+          if (item.tipo && !tipos.includes(item.tipo)) {
+            customTypes.add(item.tipo);
+          }
+        });
+      }
+    });
+    
+    return Array.from(customTypes).sort();
+  };
+
   // Función para renderizar filas de un mes específico
   const renderMonthRows = (mes) => {
     const monthTransactions = getMonthTransactions(mes);
+    const customTypes = getAllCustomTypes();
     
-    // Siempre queremos exactamente 6 filas por mes
-    const rowsToRender = Array(6).fill(null);
+    // Determinar el número de filas necesarias basadas en transacciones normales y cuentas varias
+    let maxRows = 6; // Mínimo 6 filas por mes
+    
+    if (monthTransactions.length > 0) {
+      // Contar filas necesarias para cuentas varias y tipos personalizados
+      const extraRows = monthTransactions.reduce((total, t) => {
+        const cuentasVariasCount = Math.max(
+          (t.cuentasVariasDebe?.length || 0),
+          (t.cuentasVariasHaber?.length || 0)
+        );
+        
+        const tiposPersonalizadosCount = Math.max(
+          (t.tiposPersonalizadosDebe?.length || 0),
+          (t.tiposPersonalizadosHaber?.length || 0)
+        );
+        
+        return total + Math.max(cuentasVariasCount, tiposPersonalizadosCount);
+      }, 0);
+      
+      // El total de filas es el máximo entre las transacciones regulares + filas extra o 6
+      maxRows = Math.max(maxRows, monthTransactions.length + extraRows);
+    }
+    
+    // Preparar array para las filas
+    const rowsToRender = Array(maxRows).fill(null);
+    
+    let currentRowIndex = 0;
     
     // Llenar con transacciones existentes
-    for (let i = 0; i < Math.min(monthTransactions.length, 6); i++) {
-      rowsToRender[i] = monthTransactions[i];
+    monthTransactions.forEach(transaction => {
+      // Asignar la transacción principal a la primera fila
+      rowsToRender[currentRowIndex] = {
+        ...transaction,
+        isMainRow: true,
+        cuentasVariasDebeItem: transaction.cuentasVariasDebe && transaction.cuentasVariasDebe.length > 0 
+          ? transaction.cuentasVariasDebe[0] : null,
+        cuentasVariasHaberItem: transaction.cuentasVariasHaber && transaction.cuentasVariasHaber.length > 0 
+          ? transaction.cuentasVariasHaber[0] : null,
+        tipoPersonalizadoDebeItem: transaction.tiposPersonalizadosDebe && transaction.tiposPersonalizadosDebe.length > 0
+          ? transaction.tiposPersonalizadosDebe[0] : null,
+        tipoPersonalizadoHaberItem: transaction.tiposPersonalizadosHaber && transaction.tiposPersonalizadosHaber.length > 0
+          ? transaction.tiposPersonalizadosHaber[0] : null
+      };
+      currentRowIndex++;
+      
+      // Determinar cuál lista es más larga entre cuentas varias y tipos personalizados
+      const maxExtraItemsLength = Math.max(
+        (transaction.cuentasVariasDebe?.length || 0) - 1, // -1 porque ya incluimos el primer elemento
+        (transaction.cuentasVariasHaber?.length || 0) - 1, // -1 porque ya incluimos el primer elemento
+        (transaction.tiposPersonalizadosDebe?.length || 0) - 1,
+        (transaction.tiposPersonalizadosHaber?.length || 0) - 1
+      );
+      
+      // Agregar filas para el resto de items
+      for (let i = 0; i < maxExtraItemsLength; i++) {
+        const debeIndex = i + 1; // +1 porque el índice 0 ya está incluido en la fila principal
+        const haberIndex = i + 1; // +1 porque el índice 0 ya está incluido en la fila principal
+        
+        rowsToRender[currentRowIndex] = {
+          isExtraRow: true,
+          cuentasVariasDebeItem: transaction.cuentasVariasDebe && transaction.cuentasVariasDebe.length > debeIndex 
+            ? transaction.cuentasVariasDebe[debeIndex] : null,
+          cuentasVariasHaberItem: transaction.cuentasVariasHaber && transaction.cuentasVariasHaber.length > haberIndex 
+            ? transaction.cuentasVariasHaber[haberIndex] : null,
+          tipoPersonalizadoDebeItem: transaction.tiposPersonalizadosDebe && transaction.tiposPersonalizadosDebe.length > debeIndex
+            ? transaction.tiposPersonalizadosDebe[debeIndex] : null,
+          tipoPersonalizadoHaberItem: transaction.tiposPersonalizadosHaber && transaction.tiposPersonalizadosHaber.length > haberIndex
+            ? transaction.tiposPersonalizadosHaber[haberIndex] : null
+        };
+        currentRowIndex++;
+      }
+    });
+    
+    // Añadir filas vacías si no hemos llegado al mínimo
+    while (currentRowIndex < 6) {
+      rowsToRender[currentRowIndex] = null;
+      currentRowIndex++;
     }
     
     return (
       <React.Fragment key={mes}>
-        {rowsToRender.map((transaction, index) => (
-          <tr key={`${mes}-row-${index}`} className={index === 5 ? "last-month-row" : ""}>
+        {rowsToRender.map((rowData, index) => (
+          <tr key={`${mes}-row-${index}`} className={index === rowsToRender.length - 1 ? "last-month-row" : ""}>
             {index === 0 && (
-              <td className="mes-cell" rowSpan="6">{mes}</td>
+              <td className="mes-cell" rowSpan={rowsToRender.length}>
+                <div className="vertical-text">{mes}</div>
+              </td>
             )}
             <td className="detalle-cell">
-              {transaction ? transaction.detalle || '-' : '-'}
+              {rowData && rowData.isMainRow ? rowData.detalle || '-' : '-'}
             </td>
             <td className="control-cell">
-              {transaction ? formatCurrency(transaction.control) : '-'}
+              {rowData && rowData.isMainRow ? formatCurrency(rowData.control) : '-'}
             </td>
             {tipos.map(tipo => {
-              // Para cada tipo, verificar si hay valores en debe o haber
+              if (tipo !== "Cuentas Varias") {
+                // Para tipos normales
+                let debeValue = '';
+                let haberValue = '';
+                
+                if (rowData && rowData.isMainRow) {
+                  if (rowData.debe && rowData.debe[tipo] !== undefined) {
+                    debeValue = rowData.debe[tipo];
+                  }
+                  
+                  if (rowData.haber && rowData.haber[tipo] !== undefined) {
+                    haberValue = rowData.haber[tipo];
+                  }
+                }
+                
+                return (
+                  <React.Fragment key={`${mes}-${index}-${tipo}`}>
+                    <td className="monto-cell debe">
+                      {debeValue !== '' ? formatCurrency(debeValue) : '-'}
+                    </td>
+                    <td className="monto-cell haber">
+                      {haberValue !== '' ? formatCurrency(haberValue) : '-'}
+                    </td>
+                  </React.Fragment>
+                );
+              } else {
+                // Para Cuentas Varias
+                let debeValue = '';
+                let haberValue = '';
+                let debeObservacion = '';
+                let haberObservacion = '';
+                
+                if (rowData) {
+                  if (rowData.cuentasVariasDebeItem) {
+                    debeValue = rowData.cuentasVariasDebeItem.monto;
+                    debeObservacion = rowData.cuentasVariasDebeItem.observacion;
+                  }
+                  
+                  if (rowData.cuentasVariasHaberItem) {
+                    haberValue = rowData.cuentasVariasHaberItem.monto;
+                    haberObservacion = rowData.cuentasVariasHaberItem.observacion;
+                  }
+                }
+                
+                return (
+                  <React.Fragment key={`${mes}-${index}-${tipo}`}>
+                    <td className="monto-cell debe">
+                      {debeValue !== '' ? formatCurrency(debeValue) : '-'}
+                    </td>
+                    <td className="monto-cell haber">
+                      {haberValue !== '' ? formatCurrency(haberValue) : '-'}
+                    </td>
+                    <td className="observacion-cell">
+                      {(debeObservacion || haberObservacion) ? (
+                        <div>
+                          {debeObservacion ? (
+                            <div className="obs-debe">{debeObservacion}</div>
+                          ) : null}
+                          {haberObservacion ? (
+                            <div className="obs-haber">{haberObservacion}</div>
+                          ) : null}
+                        </div>
+                      ) : '-'}
+                    </td>
+                  </React.Fragment>
+                );
+              }
+            })}
+            
+            {/* Columnas para tipos personalizados */}
+            {customTypes.map(tipo => {
               let debeValue = '';
               let haberValue = '';
               
-              if (transaction) {
-                if (transaction.debe && transaction.debe[tipo] !== undefined) {
-                  debeValue = transaction.debe[tipo];
+              if (rowData) {
+                // Para la fila principal o filas extra
+                if (rowData.tipoPersonalizadoDebeItem && rowData.tipoPersonalizadoDebeItem.tipo === tipo) {
+                  debeValue = rowData.tipoPersonalizadoDebeItem.monto;
                 }
                 
-                if (transaction.haber && transaction.haber[tipo] !== undefined) {
-                  haberValue = transaction.haber[tipo];
+                if (rowData.tipoPersonalizadoHaberItem && rowData.tipoPersonalizadoHaberItem.tipo === tipo) {
+                  haberValue = rowData.tipoPersonalizadoHaberItem.monto;
                 }
               }
               
               return (
-                <React.Fragment key={`${mes}-${index}-${tipo}`}>
+                <React.Fragment key={`${mes}-${index}-tipo-${tipo}`}>
                   <td className="monto-cell debe">
                     {debeValue !== '' ? formatCurrency(debeValue) : '-'}
                   </td>
@@ -306,350 +498,129 @@ function Historial({ onBack }) {
     );
   };
 
-  // Renderizar un mensaje de estado de carga o un mensaje de "no datos" más explícito
-  const renderStatus = () => {
-    if (loading) {
-      return <div className="loading">Cargando datos...</div>;
-    }
-    
-    if (transactions.length === 0) {
-      if (!selectedEmpresa || !selectedYear) {
-        return <div className="no-data">Seleccione una empresa y un año para ver los registros</div>;
-      }
-      
-      return (
-        <div className="no-data">
-          No se encontraron registros para <strong>{selectedEmpresa}</strong> en el año <strong>{selectedYear}</strong>
-          <p className="hint">Esto puede ser porque no existan registros o porque los valores no coinciden exactamente con los de la base de datos.</p>
-        </div>
-      );
-    }
-    
-    return (
-      <>
-        <div className="data-info">
-          Mostrando registros de <strong>{selectedEmpresa}</strong> para el año <strong>{selectedYear}</strong>
-          <span className="record-count">({transactions.length} registros encontrados)</span>
-        </div>
-        <table className="registro-table">
-          <thead>
-            <tr>
-              <th rowSpan="2">Mes</th>
-              <th rowSpan="2">Detalle</th>
-              <th rowSpan="2">Control</th>
-              {tipos.map((tipo) => (
-                <th key={tipo} colSpan="2" className="tipo-header">
-                  {tipo}
-                </th>
-              ))}
-            </tr>
-            <tr>
-              {tipos.map((tipo) => (
-                <React.Fragment key={`header-${tipo}`}>
-                  <th className="debe-header">Debe</th>
-                  <th className="haber-header">Haber</th>
-                </React.Fragment>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {meses.map((mes) => renderMonthRows(mes))}
-          </tbody>
-        </table>
-      </>
-    );
-  };
-
   return (
-    <div className="registro-container">
-      <h2 className="registro-title">Historial de Registros</h2>
-      
-      <div className="search-controls">
+    <div className="historial-container">
+      <div className="header-container">
         <button onClick={onBack} className="back-button">
-          Volver al Menú Principal
+          Volver al Formulario
         </button>
-
-        <div className="filters">
-          <div className="filter-group">
-            <label htmlFor="empresa">Empresa:</label>
-            {fetchingEmpresas ? (
-              <p className="loading-text">Cargando empresas...</p>
-            ) : (
-              <select
-                id="empresa"
-                value={selectedEmpresa}
-                onChange={(e) => setSelectedEmpresa(e.target.value)}
-                className="empresa-select"
-                disabled={empresasList.length === 0 || loading}
-              >
-                {empresasList.length === 0 ? (
-                  <option value="">No hay empresas disponibles</option>
-                ) : (
-                  <>
-                    <option value="">Seleccione una empresa</option>
-                    {empresasList.map(empresa => (
-                      <option key={empresa} value={empresa}>{empresa}</option>
-                    ))}
-                  </>
-                )}
-              </select>
-            )}
-            {empresasList.length > 0 && (
-              <small className="select-count">{empresasList.length} empresas disponibles</small>
-            )}
+        
+        <h1 className="title">Historial de Registros</h1>
+        
+        <div className="controls">
+          <div className="control-group">
+            <label htmlFor="empresa" className="label">Empresa:</label>
+            <select
+              id="empresa"
+              value={selectedEmpresa}
+              onChange={(e) => setSelectedEmpresa(e.target.value)}
+              disabled={fetchingEmpresas || loading}
+              className="select"
+            >
+              <option value="">Seleccionar Empresa</option>
+              {empresasList.map((empresa) => (
+                <option key={empresa} value={empresa}>
+                  {empresa}
+                </option>
+              ))}
+            </select>
           </div>
-
-          <div className="filter-group">
-            <label htmlFor="year">Año:</label>
-            {fetchingEmpresas ? (
-              <p className="loading-text">Cargando años...</p>
-            ) : (
-              <select
-                id="year"
-                value={selectedYear}
-                onChange={(e) => setSelectedYear(e.target.value)}
-                className="year-select"
-                disabled={availableYears.length === 0 || loading}
-              >
-                {availableYears.length === 0 ? (
-                  <option value="">No hay años disponibles</option>
-                ) : (
-                  <>
-                    <option value="">Seleccione un año</option>
-                    {availableYears.map(year => (
-                      <option key={year} value={year}>{year}</option>
-                    ))}
-                  </>
-                )}
-              </select>
-            )}
-            {availableYears.length > 0 && (
-              <small className="select-count">{availableYears.length} años disponibles</small>
-            )}
+          
+          <div className="control-group">
+            <label htmlFor="year" className="label">Año:</label>
+            <select
+              id="year"
+              value={selectedYear}
+              onChange={(e) => setSelectedYear(e.target.value)}
+              disabled={fetchingEmpresas || loading}
+              className="select"
+            >
+              <option value="">Seleccionar Año</option>
+              {availableYears.map((year) => (
+                <option key={year} value={year}>
+                  {year}
+                </option>
+              ))}
+            </select>
+          </div>
+          
+          <div className="button-group">
+            <button
+              onClick={handleSearch}
+              disabled={!selectedEmpresa || !selectedYear || loading || fetchingEmpresas}
+              className="search-button"
+            >
+              {loading ? "Cargando..." : "Buscar"}
+            </button>
           </div>
         </div>
       </div>
-
+      
       {error && <div className="error-message">{error}</div>}
-
-      <div className="table-responsive">
-        {renderStatus()}
-      </div>
-
-      <style jsx>{`
-        .registro-container {
-          padding: 20px;
-          max-width: 100%;
-          overflow-x: auto;
-        }
-
-        .registro-title {
-          margin-bottom: 20px;
-          color: #333;
-          text-align: center;
-        }
-
-        .search-controls {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 20px;
-          flex-wrap: wrap;
-          gap: 20px;
-          background-color: #f8f9fa;
-          padding: 15px;
-          border-radius: 5px;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }
-
-        .filters {
-          display: flex;
-          gap: 15px;
-          align-items: flex-end;
-          flex-wrap: wrap;
-        }
-
-        .filter-group {
-          display: flex;
-          flex-direction: column;
-          gap: 5px;
-        }
-
-        .filter-group label {
-          font-weight: 500;
-          color: #666;
-        }
-
-        .loading-text {
-          margin: 0;
-          color: #666;
-          font-size: 14px;
-        }
-
-        .select-count {
-          font-size: 12px;
-          color: #6c757d;
-          margin-top: 2px;
-        }
-
-        .empresa-select,
-        .year-select {
-          padding: 8px 12px;
-          border: 1px solid #ddd;
-          border-radius: 4px;
-          font-size: 14px;
-          min-width: 200px;
-          background-color: white;
-        }
-
-        .back-button {
-          padding: 8px 16px;
-          border: none;
-          border-radius: 4px;
-          cursor: pointer;
-          font-weight: 500;
-          transition: background-color 0.2s;
-          background-color: #6c757d;
-          color: white;
-        }
-
-        .back-button:hover {
-          background-color: #5a6268;
-        }
-
-        .error-message {
-          color: #dc3545;
-          margin-bottom: 15px;
-          padding: 10px;
-          background-color: #f8d7da;
-          border-radius: 4px;
-        }
-
-        .loading, .no-data {
-          text-align: center;
-          padding: 30px;
-          color: #666;
-          background-color: #f8f9fa;
-          border-radius: 4px;
-          margin-top: 20px;
-        }
-
-        .hint {
-          font-size: 14px;
-          margin-top: 10px;
-          color: #6c757d;
-        }
-
-        .data-info {
-          margin-bottom: 15px;
-          padding: 10px;
-          background-color: #e9ecef;
-          border-radius: 4px;
-          text-align: center;
-        }
-
-        .record-count {
-          margin-left: 10px;
-          font-size: 14px;
-          color: #6c757d;
-        }
-
-        .table-responsive {
-          overflow-x: auto;
-          margin-top: 20px;
-        }
-
-        .registro-table {
-          width: 100%;
-          border-collapse: collapse;
-          font-size: 14px;
-          white-space: nowrap;
-        }
-
-        .registro-table th,
-        .registro-table td {
-          border: 1px solid #ddd;
-          padding: 8px;
-          text-align: center;
-        }
-
-        .registro-table thead th {
-          background-color: #f8f9fa;
-          font-weight: 600;
-          position: sticky;
-          top: 0;
-          z-index: 10;
-        }
-
-        .tipo-header {
-          background-color: #e9ecef;
-        }
-
-        .debe-header {
-          background-color: #f8d7da;
-        }
-
-        .haber-header {
-          background-color: #d4edda;
-        }
-
-        .mes-cell {
-          font-weight: 500;
-          background-color: #f8f9fa;
-          position: sticky;
-          left: 0;
-          z-index: 5;
-          border: 2px solid #aaa;
-        }
-
-        .detalle-cell {
-          text-align: left;
-          max-width: 250px;
-          white-space: normal;
-          word-break: break-word;
-        }
-
-        .control-cell {
-          font-weight: 500;
-        }
-
-        .monto-cell {
-          text-align: right;
-        }
-
-        .monto-cell.debe {
-          background-color: #f3fff3;
-        }
-
-        .monto-cell.haber {
-          background-color: #fff3f3;
-        }
-
-        .last-month-row td {
-          border-bottom: 2px solid #aaa;
-        }
-
-        @media (max-width: 768px) {
-          .search-controls {
-            flex-direction: column;
-            align-items: stretch;
-          }
-
-          .filters {
-            flex-direction: column;
-          }
-
-          .filter-group {
-            width: 100%;
-          }
-
-          .empresa-select,
-          .year-select {
-            width: 100%;
-            min-width: unset;
-          }
-        }
-      `}</style>
+      
+      {loading ? (
+        <div className="loading">Cargando datos...</div>
+      ) : (
+        <div className="results-container">
+          {transactions.length > 0 ? (
+            <div className="table-wrapper">
+              <table className="historial-table" ref={tableRef}>
+                <thead>
+                  <tr>
+                    <th className="fixed-column mes-header" rowSpan="2">Mes</th>
+                    <th className="fixed-column detalle-header" rowSpan="2">Detalle</th>
+                    <th className="fixed-column control-header" rowSpan="2">Control</th>
+                    
+                    {tipos.map(tipo => (
+                      <React.Fragment key={`header-${tipo}`}>
+                        {tipo !== "Cuentas Varias" ? (
+                          <th className="tipo-header" colSpan="2">{tipo}</th>
+                        ) : (
+                          <th className="tipo-header" colSpan="3">Cuentas Varias</th>
+                        )}
+                      </React.Fragment>
+                    ))}
+                    
+                    {/* Encabezados para tipos personalizados */}
+                    {getAllCustomTypes().map(tipo => (
+                      <th className="tipo-header" key={`header-custom-${tipo}`} colSpan="2">
+                        {tipo}
+                      </th>
+                    ))}
+                  </tr>
+                  <tr>
+                    {/* Subencabezados para tipos regulares */}
+                    {tipos.map(tipo => (
+                      <React.Fragment key={`subheader-${tipo}`}>
+                        <th className="debe-header">Debe</th>
+                        <th className="haber-header">Haber</th>
+                        {tipo === "Cuentas Varias" && (
+                          <th className="observacion-header">Observaciones</th>
+                        )}
+                      </React.Fragment>
+                    ))}
+                    
+                    {/* Subencabezados para tipos personalizados */}
+                    {getAllCustomTypes().map(tipo => (
+                      <React.Fragment key={`subheader-custom-${tipo}`}>
+                        <th className="debe-header">Debe</th>
+                        <th className="haber-header">Haber</th>
+                      </React.Fragment>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {meses.map(mes => renderMonthRows(mes))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            selectedEmpresa && selectedYear && !loading ? (
+              <div className="no-results">No se encontraron registros para los criterios seleccionados.</div>
+            ) : null
+          )}
+        </div>
+      )}
     </div>
   );
 }

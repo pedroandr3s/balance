@@ -2,11 +2,11 @@ import React, { useState, useEffect } from 'react';
 import './App.css';
 import { db } from './components/firebaseConfig';
 import { collection, addDoc, onSnapshot, query, orderBy } from 'firebase/firestore';
-import Debe from './components/debe';
-import Haber from './components/haber';
 import Historial from './components/historial';
 import Empresas from './components/Empresas'; 
 import Registro from './components/registro';
+import Balance from './components/balance';
+
 
 function App() {
   const [view, setView] = useState("main");
@@ -56,22 +56,11 @@ function App() {
   const renderMainView = () => (
     <div className="container">
       <h2>Menú Principal</h2>
-      <div className="button-container">
-        <button className="debe-button" onClick={() => setView("debe")}>
-          Registrar Debe
-        </button>
-        <button className="expense-button" onClick={() => setView("expenses")}>
-          Registrar Haber
-        </button>
-        <button className="history-button" onClick={() => setView("dates")}>
-          Ver Historial
-        </button>
-        <button className="empresas-button" onClick={() => setView("empresas")}>
-          Empresas
-        </button>
-        <button className="debe-button" onClick={() => setView("Registro")}>
-          Registro
-        </button>
+      <div className="button-container" style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+        <button className="registro-button" onClick={() => setView("Registro")}>Hacer Registro</button>
+        <button className="empresas-button" onClick={() => setView("empresas")}>Empresas</button>
+        <button className="history-button" onClick={() => setView("dates")}>Ver Historial</button>
+        <button className="balance-button" onClick={() => setView("balance")}>Balance</button>
       </div>
     </div>
   );
@@ -79,28 +68,10 @@ function App() {
   return (
     <div className="App">
       {view === "main" && renderMainView()}
-      {view === "debe" && (
-        <Debe 
-          onSubmit={handleTransactionSubmit} 
-          onBack={() => setView("main")}
-          onHaberClick={() => setView("expenses")}
-        />
-      )}
-      {view === "expenses" && (
-        <Haber 
-          onSubmit={handleTransactionSubmit} 
-          onBack={() => setView("main")}
-          onDebeClick={() => setView("debe")}
-        />
-      )}
-      {view === "dates" && (
-        <Historial 
-          onBack={handleBackToMain} 
-          transactions={transactions} 
-        />
-      )}
-      {view === "empresas" && <Empresas onBack={() => setView("main")} />}
-      {view === "Registro" && <Registro onBack={() => setView("main")} />}
+      {view === "dates" && <Historial onBack={handleBackToMain} transactions={transactions} />}
+      {view === "empresas" && <Empresas onBack={handleBackToMain} />}
+      {view === "Registro" && <Registro onBack={handleBackToMain} />}
+      {view === "balance" && <Balance onBack={handleBackToMain} />}
 
     </div>
   );
