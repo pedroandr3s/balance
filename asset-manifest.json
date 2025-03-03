@@ -1,0 +1,13 @@
+{
+  "files": {
+    "main.css": "/contadorayoya/contadorayoya.github.io/static/css/main.9691be22.css",
+    "main.js": "/contadorayoya/contadorayoya.github.io/static/js/main.cd49ec47.js",
+    "index.html": "/contadorayoya/contadorayoya.github.io/index.html",
+    "main.9691be22.css.map": "/contadorayoya/contadorayoya.github.io/static/css/main.9691be22.css.map",
+    "main.cd49ec47.js.map": "/contadorayoya/contadorayoya.github.io/static/js/main.cd49ec47.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.9691be22.css",
+    "static/js/main.cd49ec47.js"
+  ]
+}
